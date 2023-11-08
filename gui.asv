@@ -1,0 +1,461 @@
+function varargout = gui(varargin)
+% GUI MATLAB code for gui.fig
+%      GUI, by itself, creates a new GUI or raises the existing
+%      singleton*.
+%
+%      H = GUI returns the handle to a new GUI or the handle to
+%      the existing singleton*.
+%
+%      GUI('CALLBACK',hObject,eventData,handles,...) calls the local
+%      function named CALLBACK in GUI.M with the given input arguments.
+%
+%      GUI('Property','Value',...) creates a new GUI or raises the
+%      existing singleton*.  Starting from the left, property value pairs are
+%      applied to the GUI before gui_OpeningFcn gets called.  An
+%      unrecognized property name or invalid value makes property application
+%      stop.  All inputs are passed to gui_OpeningFcn via varargin.
+%
+%      *See GUI Options on GUIDE's Tools menu.  Choose "GUI allows only one
+%      instance to run (singleton)".
+%
+% See also: GUIDE, GUIDATA, GUIHANDLES
+
+% Edit the above text to modify the response to help gui
+
+% Last Modified by GUIDE v2.5 11-May-2023 19:15:41
+
+% Begin initialization code - DO NOT EDIT
+gui_Singleton = 1;
+gui_State = struct('gui_Name',       mfilename, ...
+                   'gui_Singleton',  gui_Singleton, ...
+                   'gui_OpeningFcn', @gui_OpeningFcn, ...
+                   'gui_OutputFcn',  @gui_OutputFcn, ...
+                   'gui_LayoutFcn',  [] , ...
+                   'gui_Callback',   []);
+if nargin && ischar(varargin{1})
+    gui_State.gui_Callback = str2func(varargin{1});
+end
+
+if nargout
+    [varargout{1:nargout}] = gui_mainfcn(gui_State, varargin{:});
+else
+    gui_mainfcn(gui_State, varargin{:});
+end
+% End initialization code - DO NOT EDIT
+
+
+% --- Executes just before gui is made visible.
+function gui_OpeningFcn(hObject, eventdata, handles, varargin)
+% This function has no output args, see OutputFcn.
+% hObject    handle to figure
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+% varargin   command line arguments to gui (see VARARGIN)
+
+% Choose default command line output for gui
+handles.output = hObject;
+
+% Update handles structure
+guidata(hObject, handles);
+
+% UIWAIT makes gui wait for user response (see UIRESUME)
+% uiwait(handles.figure1);
+
+
+% --- Outputs from this function are returned to the command line.
+function varargout = gui_OutputFcn(hObject, eventdata, handles) 
+% varargout  cell array for returning output args (see VARARGOUT);
+% hObject    handle to figure
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Get default command line output from handles structure
+varargout{1} = handles.output;
+
+%训练语音
+% --- Executes on button press in pushbutton1.
+function pushbutton1_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbutton1 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+Spk_num=10; %说话人个数
+Tra_num=10;  %每个说话人用于训练的语音数目
+
+ncentres=2; %混合成分数目
+fs=16000; %采样频率
+
+% -- Train ---
+load train.mat; 
+for spk_cyc=1:Spk_num    % 遍历说话人
+  fprintf('Train the %ith speaker\n',spk_cyc);
+  tag1=1;tag2=1; %用于汇总存储mfcc
+  for sph_cyc=1:Tra_num  % 遍历语音
+     speech = tdata1{spk_cyc}{sph_cyc}; 
+      %---预处理,特征提取--
+
+     pre_sph=filter([1 -0.97],1,speech); % pre-emphasis
+     win_type='M'; %汉明窗
+     cof_num=20; %倒谱系数个数
+     frm_len=fs*0.02; %帧长：20ms
+     fil_num=20; %滤波器组个数
+     frm_off=fs*0.01; %帧移：10ms
+     c=melcepst(pre_sph,fs,win_type,cof_num,fil_num,frm_len,frm_off); % mfcc特征提取
+     cc=c(:,1:end-1)';
+     tag2=tag1+size(cc,2);
+     cof(:,tag1:tag2-1)=cc;
+     tag1=tag2;
+  end
+   
+  %--- Train GMM Model---
+  kiter=5; %The maximum number of iterations of Kmeans
+  emiter=30; %The maximum number of iterations of the EM algorithm
+  mix=gmm_init(ncentres,cof',kiter,'full'); % GMM的初始化
+  [mix,post,errlog]=gmm_em(mix,cof',emiter); % GMM的参数估计
+  speaker{spk_cyc}.pai=mix.priors;
+  speaker{spk_cyc}.mu=mix.centres;
+  speaker{spk_cyc}.sigma=mix.covars;
+
+  clear cof mix;
+end
+fprintf('Training is complete! \n',spk_cyc);
+save speaker.mat speaker;
+set(handles.edit1, 'string','Voiceprint training completed'); 
+
+
+%显示状态
+function edit1_Callback(hObject, eventdata, handles)
+% hObject    handle to edit1 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of edit1 as text
+%        str2double(get(hObject,'String')) returns contents of edit1 as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function edit1_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to edit1 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+%实时识别
+% --- Executes on button press in pushbutton2.
+function pushbutton2_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbutton2 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+%实时
+if get(handles.popupmenu1,'Value')==2
+      fs1 =16000;  %采样率为16000Hz
+disp('Start Recording......')
+set(handles.edit1,'string','Start Recording'); 
+duration=4;  %录制 4s 的数据
+n = duration*fs1; 
+t = (1:n)/fs1;
+recObj = audiorecorder(fs1,16,1);
+recordblocking(recObj, duration);
+disp('End Recording......');% 
+ set(handles.edit1,'string','End Recording'); 
+y = getaudiodata(recObj);  %获取录音数据
+myRecording = getaudiodata(recObj);% 获取录音数据波形
+axes(handles.axes2) %将Tag值为axes1的坐标轴置为当前
+plot(myRecording);%绘制录音波形
+play(recObj);  %播放录制的音频
+filename ='luy.wav';  %准备写的音频数据文件 
+audiowrite(filename,y,fs1) ;   %将 y 以 fs 采样率写到文件中 
+info = audioinfo(filename);   %使用audioinfo 函数查看文件的信息
+  mob=2
+  spk_cyc=1
+  load test.mat;
+load speaker.mat;   % 载入训练好的模型
+load cof.mat ;
+Spk_num=10; %说话人个数
+Tes_num=1;  %每个说话人待识别的语音数目
+fs=16000; %采样频率
+ncentres=2; %混合成分数目
+ speech1 = rdata1{spk_cyc}{1};
+
+     filename ='luy.wav';  %录音
+     speech2=audioread(filename);
+%          axes(handles.axes2) %将Tag值为axes1的坐标轴置为当前
+% plot(speech2);
+if mob==1
+   speech=speech1; 
+elseif mob==2
+    speech=speech2;
+end
+    axes(handles.axes2) %将Tag值为axes1的坐标轴置为当前
+plot(speech);
+     %---预处理,特征提取--
+     pre_sph=filter([1 -0.97],1,speech);
+     win_type='M'; %汉明窗
+     cof_num=20; %倒谱系数个数
+     frm_len=fs*0.02; %帧长：20ms
+     fil_num=20; %滤波器组个数
+     frm_off=fs*0.01; %帧移：10ms
+     c=melcepst(pre_sph,fs,win_type,cof_num,fil_num,frm_len,frm_off); %(帧数)*(cof_num)
+     cof=c(:,1:end-1); %N*D维矢量
+     axes(handles.axes3) %将Tag值为axes1的坐标轴置为当前
+imagesc(cof)
+     %----识别---
+     MLval=zeros(size(cof,1),Spk_num);
+     for b=1:Spk_num %说话人循环
+     pai=speaker{b}.pai;
+     for k=1:ncentres 
+       mu=speaker{b}.mu(k,:);
+       sigma=speaker{b}.sigma(:,:,k);
+       pdf=mvnpdf(cof,mu,sigma);
+       MLval(:,b)=MLval(:,b)+pdf*pai(k); 
+     end
+    end
+    logMLval=log((MLval)+eps);
+    sumlog=sum(logMLval,1);
+    [maxsl,idx]=max(sumlog); 
+    fprintf('Recognition results：%ith speaker\n',idx);     
+
+       str1=['The speaker identified is the',num2str(idx),'th speaker'];
+ set(handles.edit4,'string',str1); 
+   
+
+end
+if get(handles.popupmenu1,'Value')==1
+% -- Recognition ---
+load test.mat;
+load speaker.mat;   % 载入训练好的模型
+load cof.mat ;
+Spk_num=10; %说话人个数
+Tes_num=1;  %每个说话人待识别的语音数目
+fs=16000; %采样频率
+ncentres=2; %混合成分数目
+
+       
+     %----识别---
+     MLval=zeros(size(cof,1),Spk_num);
+     for b=1:Spk_num %说话人循环
+     pai=speaker{b}.pai;
+     for k=1:ncentres 
+       mu=speaker{b}.mu(k,:);
+       sigma=speaker{b}.sigma(:,:,k);
+       pdf=mvnpdf(cof,mu,sigma);
+       MLval(:,b)=MLval(:,b)+pdf*pai(k); 
+     end
+    end
+    logMLval=log((MLval)+eps);
+    sumlog=sum(logMLval,1);
+    [maxsl,idx]=max(sumlog); 
+    fprintf('Recognition results：%ith speaker\n',idx);     
+  
+str1=['The speaker identified is the',num2str(idx),'th speaker'];
+ set(handles.edit4,'string',str1); 
+  set(handles.edit1,'string','Recognition completed'); 
+
+end
+
+
+% --- Executes on button press in pushbutton3.
+function pushbutton3_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbutton3 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+
+
+% --- Executes on button press in pushbutton4.
+function pushbutton4_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbutton4 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+ 
+
+
+% --- Executes on button press in pushbutton5.
+function pushbutton5_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbutton5 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+set(handles.edit1, 'string','')   
+ set(handles.edit4,'string',''); 
+
+
+% --- Executes on selection change in popupmenu1.
+function popupmenu1_Callback(hObject, eventdata, handles)
+% hObject    handle to popupmenu1 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: contents = cellstr(get(hObject,'String')) returns popupmenu1 contents as cell array
+%        contents{get(hObject,'Value')} returns selected item from popupmenu1
+
+
+% --- Executes during object creation, after setting all properties.
+function popupmenu1_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to popupmenu1 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: popupmenu controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes on selection change in popupmenu2.
+function popupmenu2_Callback(hObject, eventdata, handles)
+% hObject    handle to popupmenu2 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: contents = cellstr(get(hObject,'String')) returns popupmenu2 contents as cell array
+%        contents{get(hObject,'Value')} returns selected item from popupmenu2
+
+
+% --- Executes during object creation, after setting all properties.
+function popupmenu2_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to popupmenu2 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: popupmenu controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes during object creation, after setting all properties.
+function axes3_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to axes3 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: place code in OpeningFcn to populate axes3
+
+%提取特征
+% --- Executes on button press in pushbutton6.
+function pushbutton6_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbutton6 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+if get(handles.popupmenu1,'Value')==1
+    mob=1; 
+        if get(handles.popupmenu2,'Value')==2
+      spk_cyc=1;  
+        elseif get(handles.popupmenu2,'Value')==3
+      spk_cyc=2;
+        elseif get(handles.popupmenu2,'Value')==4
+      spk_cyc=3;
+        elseif get(handles.popupmenu2,'Value')==5
+      spk_cyc=4;
+        elseif get(handles.popupmenu2,'Value')==6
+      spk_cyc=5;
+        elseif get(handles.popupmenu2,'Value')==7
+      spk_cyc=6;
+        elseif get(handles.popupmenu2,'Value')==8
+      spk_cyc=7;
+        elseif get(handles.popupmenu2,'Value')==9
+      spk_cyc=8;
+        elseif get(handles.popupmenu2,'Value')==10
+      spk_cyc=9;
+        elseif get(handles.popupmenu2,'Value')==11
+      spk_cyc=10;
+   
+  end
+end
+
+load test.mat;
+load speaker.mat;   % 载入训练好的模型
+Spk_num=10; %说话人个数
+Tes_num=1;  %每个说话人待识别的语音数目
+fs=16000; %采样频率
+ncentres=2; %混合成分数目
+ speech1 = rdata1{spk_cyc}{1};
+
+     filename ='luy.wav';  %录音
+     speech2=audioread(filename);
+if mob==1
+   speech=speech1; 
+elseif mob==2
+    speech=speech2;
+end
+%     axes(handles.axes2) %将Tag值为axes1的坐标轴置为当前
+% plot(speech);
+     %---预处理,特征提取--
+     pre_sph=filter([1 -0.97],1,speech);
+     win_type='M'; %汉明窗
+     cof_num=20; %倒谱系数个数
+     frm_len=fs*0.02; %帧长：20ms
+     fil_num=20; %滤波器组个数
+     frm_off=fs*0.01; %帧移：10ms
+     c=melcepst(pre_sph,fs,win_type,cof_num,fil_num,frm_len,frm_off); %(帧数)*(cof_num)
+     cof=c(:,1:end-1); %N*D维矢量
+    
+       save cof.mat cof;
+ axes(handles.axes3) %将Tag值为axes1的坐标轴置为当前
+imagesc(cof)
+  set(handles.edit1,'string','MFCC feature extraction completed'); 
+
+function edit4_Callback(hObject, eventdata, handles)
+% hObject    handle to edit4 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: get(hObject,'String') returns contents of edit4 as text
+%        str2double(get(hObject,'String')) returns contents of edit4 as a double
+
+
+% --- Executes during object creation, after setting all properties.
+function edit4_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to edit4 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% --- Executes on button press in pushbutton7.
+function pushbutton7_Callback(hObject, eventdata, handles)
+% hObject    handle to pushbutton7 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+if get(handles.popupmenu1,'Value')==1
+    mob=1; 
+        if get(handles.popupmenu2,'Value')==2
+      spk_cyc=1;  
+        elseif get(handles.popupmenu2,'Value')==3
+      spk_cyc=2;
+        elseif get(handles.popupmenu2,'Value')==4
+      spk_cyc=3;
+              elseif get(handles.popupmenu2,'Value')==5
+      spk_cyc=4;
+        elseif get(handles.popupmenu2,'Value')==6
+      spk_cyc=5;
+              elseif get(handles.popupmenu2,'Value')==7
+      spk_cyc=6;
+        elseif get(handles.popupmenu2,'Value')==8
+      spk_cyc=7;
+              elseif get(handles.popupmenu2,'Value')==9
+      spk_cyc=8;
+        elseif get(handles.popupmenu2,'Value')==10
+      spk_cyc=9;
+              elseif get(handles.popupmenu2,'Value')==11
+      spk_cyc=10;
+   
+  end
+end
+load test.mat;
+fs=16000; %采样频率
+ speech1 = rdata1{spk_cyc}{1};
+    axes(handles.axes2) %将Tag值为axes1的坐标轴置为当前
+plot(speech1);
